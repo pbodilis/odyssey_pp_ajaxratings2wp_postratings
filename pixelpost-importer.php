@@ -25,7 +25,7 @@ add_action('wp_ajax_pp_ajaxRatings2wp_postRatings_migration_stop', 'pp_ajaxRatin
 
 function pp_ajaxRatings2wp_postRatings_migration_resume_callback() {
     update_option('pp_ajaxRatings2wp_postRatings_migration_stop', 'false');
-    echo json_encode($GLOBALS['pp_ajaxRatings_import']->pp_ajaxRatings2wp_postRatings());
+    echo json_encode($GLOBALS['PP_AjaxRatings_Importer']->pp_ajaxRatings2wp_postRatings());
     die();
 }
 add_action('wp_ajax_pp_ajaxRatings2wp_postRatings_migration_resume', 'pp_ajaxRatings2wp_postRatings_migration_resume_callback');
@@ -47,7 +47,7 @@ if ( ! class_exists( 'WP_Importer')) {
         require $class_wp_importer;
 }
 
-if ( class_exists( 'PP_Importer' ) ) {
+if ( ! class_exists( 'PP_Importer' ) ) {
     die('<p>Please install pp2wp importer: <a href="https://github.com/pbodilis/odyssey_pp2wp">get it here!</a></p>');
 }
 
@@ -58,29 +58,18 @@ if ( class_exists( 'PP_Importer' ) ) {
  * @subpackage Importer
  */
 if ( class_exists( 'WP_Importer' ) ) {
-class PP_AjaxRatings_Import extends WP_Importer {
-    const PPIMPORTER_PIXELPOST_AJAXRATINGS_OPTIONS = 'pp2wp_pixelpost_ajaxratings_importer_settings';
-    const PPIMPORTER_PIXELPOST_SUBMIT  = 'pp2wp_pixelpost_importer_submit';
-    const PPIMPORTER_PIXELPOST_RESET   = 'pp2wp_pixelpost_importer_reset';
+class PP_AjaxRatings_Importer extends PP_Importer {
    
-    private $ppdbh;
-    private $prefix;
-    private $ppurl;
-    private $tmp_dir;
-    private $img_size;
-
-    function header() {
-        echo '<div class="wrap">';
-        echo '<div id="icon-tools" class="icon32"><br></div>' . PHP_EOL;
-        echo '<h2>'.__('Import ajaxRatings from Pixelpost').'</h2>';
+    function get_title() {
+        return __('Import Ajax Ratings from Pixelpost');
     }
 
-    function footer() {
-        echo '</div>';
+    function get_slug() {
+        return 'pixelpost_ajaxRatings';
     }
 
     function get_pixelpost_default_settings() {
-        $ppImporterOptions = get_option(PP_Import::PPIMPORTER_PIXELPOST_OPTIONS);
+        $ppImporterOptions = get_option(parent::get_option_name());
 
         return array(
             'dbuser'      => $ppImporterOptions['dbuser'],
@@ -92,14 +81,16 @@ class PP_AjaxRatings_Import extends WP_Importer {
             'wpmaxrating' => get_option('postratings_max'),
         );
     }
-    function get_pixelpost_settings() {
-        return get_option(self::PPIMPORTER_PIXELPOST_AJAXRATINGS_OPTIONS, $this->get_pixelpost_default_settings());
+
+    function get_option_name() {
+        return 'pp2wp_pixelpost_ajaxratings_importer_settings';
     }
 
-    static function setting2Type($s) {
-        return ($s == 'dbpass') ? 'password' : 'text';
+    function get_pixelpost_settings() {
+        return get_option($this->get_option_name(), $this->get_pixelpost_default_settings());
     }
-    static function setting2Label($s) {
+
+    function setting2Label($s) {
          $s2l = array(
             'dbuser'      => __('Pixelpost Database User:'),
             'dbpass'      => __('Pixelpost Database Password:'),
@@ -112,46 +103,10 @@ class PP_AjaxRatings_Import extends WP_Importer {
         return $s2l[$s];
     }
 
-    function greet() {
-        if ( isset( $_POST[self::PPIMPORTER_PIXELPOST_RESET] ) ) {
-            delete_option(self::PPIMPORTER_PIXELPOST_AJAXRATINGS_OPTIONS);
-        }
-        $settings = $this->get_pixelpost_settings();
-        if ( isset( $_POST[ self::PPIMPORTER_PIXELPOST_SUBMIT ] ) ) {
-            unset( $_POST[ self::PPIMPORTER_PIXELPOST_SUBMIT ] );
-            foreach ( $_POST as $name => $setting ) {
-                $settings[$name] = $setting;
-            }
-            update_option(self::PPIMPORTER_PIXELPOST_AJAXRATINGS_OPTIONS, $settings);
-        }
-
+    function description() {
         echo '<p>' . __( 'This importer allows you to extract ratings from Pixelpost\'s <a href="http://www.pixelpost.org/extend/addons/ajax-photo-ratings/">ajax ratings</a> into wordpress\' <a href="http://lesterchan.net/portfolio/programming/php/">wp-postRatings</a> by Lester Chan.' ) . '</p>';
         echo '<p>' . __( 'This importer works as an addition to the pp2wp importer, and uses table and data created by the latter.' ) . '</p>';
         echo '<p>' . __( 'Please note that this improter has been developped for pixelpost 1.7.1 and wordpress 3.5.1. It may not work very well with other versions.' ) . '</p>';
-        echo '<p>' . __( 'Your Pixelpost configuration settings are as follows:' ) . '</p>';
-
-        echo '<form action="admin.php?import=pixelpost_ajaxRatings&amp;step=1" method="post">';
-        echo '  <table class="form-table">';
-        echo '    <tbody>';
-        foreach ($settings as $name => &$setting) {
-            echo '      <tr valign="top">';
-            echo '        <th scope="row">';
-            echo '          <label for="' . $name . '" name="' . $name . '" style="width: 300px; display: inline-block;">';
-            echo             self::setting2Label($name);
-            echo '          </label>';
-            echo '        </th>';
-            echo '        <td>';
-            echo '          <input id="' . $name . '" name="' . $name . '" type="' . self::setting2Type($name) . '" value="' . $setting . '"  size="60" />';
-            echo '        </td>';
-            echo '      </tr>';
-        }
-        echo '    </tbody>';
-        echo '  </table>';
-        echo '  <p>';
-        echo '    <input type="submit" name="' . self::PPIMPORTER_PIXELPOST_SUBMIT . '"  class="button button-primary" value="' . __( 'update settings' ) . '" />';
-        echo '    <input type="submit" name="' . self::PPIMPORTER_PIXELPOST_RESET  . '"  class="button button-primary" value="' . __( 'reset settings' )  . '" />';
-        echo '  </p>';
-        echo '</form>';
     }
     
     function init() {
@@ -172,34 +127,9 @@ class PP_AjaxRatings_Import extends WP_Importer {
         $this->wpmaxrating = $settings['wpmaxrating'];
 
         global $wpdb;
-        $wpdb->pp2wp = $wpdb->prefix . PP_Import::PPIMPORTER_PIXELPOST_TO_WORDPRESS_TABLE;
+        $wpdb->pp2wp = $wpdb->prefix . parent::PPIMPORTER_PIXELPOST_TO_WORDPRESS_TABLE;
     }
 
-    function get_pp_dbh() {
-        if (!isset($this->ppdbh)) $this->init();
-        return $this->ppdbh;
-    }
-
-    /**
-     * gets the wp post id bound to a pp post id.
-     */
-    function get_pp2wp_wp_post_id($pp_post_id) {
-        global $wpdb;
-        $wpdb->pp2wp = $wpdb->prefix . PP_Import::PPIMPORTER_PIXELPOST_TO_WORDPRESS_TABLE;
-
-        $row = $wpdb->get_row("SELECT * FROM $wpdb->pp2wp WHERE pp_post_id = $pp_post_id", ARRAY_A);
-        return is_null($row) ? false : $row['wp_post_id'];
-    }
-
-    function get_pp_post_count() {
-        $res_pdo = $this->get_pp_dbh()->query("SELECT count(id) as 'post_count' FROM {$this->prefix}pixelpost");
-        $ret = $res_pdo->fetchAll();
-        if (is_array($ret)) {
-            return $ret[0]['post_count'];
-        } else {
-            return 0;
-        }
-    }
 
     function get_pp_post_ratings() {
         return $this->get_pp_dbh()->query("SELECT * FROM {$this->prefix}ajaxRatings");
@@ -223,6 +153,7 @@ class PP_AjaxRatings_Import extends WP_Importer {
         $now = current_time('timestamp');
 
         $count = 0;
+
         $pp_ratings = $this->get_pp_post_ratings();
         set_time_limit(0);
         foreach($pp_ratings as $pp_rating) {
@@ -235,9 +166,18 @@ class PP_AjaxRatings_Import extends WP_Importer {
             }
             $wp_post_title = get_the_title($wp_post_id);
             // readjust rates from pp scale to wp scale
-            $rate = $pp_rating['total_rate'] * $this->wpmaxrating / $this->ppmaxrating;
+            $rate = floatval($pp_rating['total_rate']) * $this->wpmaxrating / $this->ppmaxrating;
+
+            $current_total = $rate;
+            $current_count = 1;
             foreach(unserialize($pp_rating['used_ips']) as $voting_ip) {
-                $this->insert_vote($wp_post_id, $wp_post_title, $rate, $now, $voting_ip);
+                $nrate = intval($rate);
+                if ((floatval($current_total) / $current_count) < $rate) {
+                    ++$nrate;
+                }
+                $this->insert_vote($wp_post_id, $wp_post_title, $nrate, $now, $voting_ip);
+                $current_total += $nrate;
+                ++$current_count;
             }
             ++$count;
 break;
@@ -266,13 +206,7 @@ break;
     function dispatch() {
         $this->header();
 
-        if (isset ( $_POST[ self::PPIMPORTER_PIXELPOST_SUBMIT ] ) ||
-            isset ( $_POST[ self::PPIMPORTER_PIXELPOST_RESET ] )  ||
-            empty ( $_GET['step'] ) ) {
-            $step = 0;
-        } else {
-            $step = intval ( $_GET ['step']);
-        }
+        $step = intval ( $_GET ['step']);
 
         switch ( $step ) {
             default:
@@ -286,7 +220,7 @@ break;
         );
 
         if ( isset ( $step2Str[ $step ] ) ) {
-            echo '<form action="admin.php?import=pixelpost_ajaxRatings&amp;step=' . ($step + 1) . '" method="post">';
+            echo '<form action="admin.php?import=' . $this->get_slug() . '&amp;step=' . ($step + 1) . '" method="post">';
             echo '  <input type="submit" name="submit" value="' . $step2Str[$step] . '" class="button button-primary" />';
             echo '</form>';
         }
@@ -305,12 +239,12 @@ function pixelpost_ratings_importer_init() {
      * WordPress Importer object for registering the import callback
      * @global WP_Import $wp_import
      */
-    $GLOBALS['pp_ajaxRatings_import'] = new PP_AjaxRatings_Import();
+    $GLOBALS['PP_AjaxRatings_Importer'] = new PP_AjaxRatings_Importer();
     register_importer(
-        'pixelpost_ajaxRatings',
+        $GLOBALS['PP_AjaxRatings_Importer']->get_slug(),
         'PixelPost Ajax Ratings',
         __('Import <strong>ajaxRatings</strong> from a pixelpost installation.', 'pixelpost-ajaxRatings-importer'),
-        array($GLOBALS['pp_ajaxRatings_import'], 'dispatch')
+        array($GLOBALS['PP_AjaxRatings_Importer'], 'dispatch')
     );
 }
 add_action('admin_init', 'pixelpost_ratings_importer_init');
