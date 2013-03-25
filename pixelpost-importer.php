@@ -10,26 +10,13 @@ Text Domain: pixelpost-ajaxRatings-importer
 License: GPL version 2 or later - http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 */
 
+
 // first, the ajax calls
-function pp_ajaxRatings2wp_postRatings_migration_status_callback() {
-    echo get_option('pp_ajaxRatings2wp_postRatings_migration_percentage', 0);
+function pp_ajaxRating2wp_postRating_migrate_callback() {
+    echo json_encode($GLOBALS['PP_AjaxRatings_Importer']->pp_ajaxRating2wp_postRating($_GET['pp_post_id']));
     die();
 }
-add_action('wp_ajax_pp_ajaxRatings2wp_postRatings_migration_status', 'pp_ajaxRatings2wp_postRatings_migration_status_callback');
-
-function pp_ajaxRatings2wp_postRatings_migration_stop_callback() {
-    update_option('pp_ajaxRatings2wp_postRatings_migration_stop', 'true');
-    die();
-}
-add_action('wp_ajax_pp_ajaxRatings2wp_postRatings_migration_stop', 'pp_ajaxRatings2wp_postRatings_migration_stop_callback');
-
-function pp_ajaxRatings2wp_postRatings_migration_resume_callback() {
-    update_option('pp_ajaxRatings2wp_postRatings_migration_stop', 'false');
-    echo json_encode($GLOBALS['PP_AjaxRatings_Importer']->pp_ajaxRatings2wp_postRatings());
-    die();
-}
-add_action('wp_ajax_pp_ajaxRatings2wp_postRatings_migration_resume', 'pp_ajaxRatings2wp_postRatings_migration_resume_callback');
-add_action('wp_ajax_pp_ajaxRatings2wp_postRatings_migration_start', 'pp_ajaxRatings2wp_postRatings_migration_resume_callback');
+add_action('wp_ajax_pp_ajaxRating2wp_postRating_migrate', 'pp_ajaxRating2wp_postRating_migrate_callback');
 
 
 // let's comment this, as the ajax callbacks needs it (wp_ajax_pp_ajaxRatings2wp_postRatings_migration_start & wp_ajax_pp_ajaxRatings2wp_postRatings_migration_resume)
@@ -130,27 +117,37 @@ class PP_AjaxRatings_Importer extends PP_Importer {
         $wpdb->pp2wp = $wpdb->prefix . parent::PPIMPORTER_PIXELPOST_TO_WORDPRESS_TABLE;
     }
 
+    function get_pp_post_rating($pp_post_id) {
+        $res_pdo = $this->get_pp_dbh()->query("SELECT * FROM {$this->prefix}ajaxRatings WHERE img_id='$pp_post_id'");
+        $ret = $res_pdo->fetchAll();
+        return $ret[0];
+    }
 
     function get_pp_post_ratings() {
         return $this->get_pp_dbh()->query("SELECT * FROM {$this->prefix}ajaxRatings");
     }
 
-    protected $hostnameCache = array();
-    function insert_vote($wp_post_id, $wp_post_title, $rate, $now, $voting_ip) {
-        if ( ! isset($this->hostnameCache[ $voting_ip ])) {
-            $this->hostnameCache[ $voting_ip ] = esc_attr(@gethostbyaddr($voting_ip));
-        }
-        $hostname = $this->hostnameCache[ $voting_ip ];
+    function get_hostname_by_voting_ip($voting_ip) {
+        global $wpdb;
+        $ret = $wpdb->get_row("SELECT distinct(rating_host) FROM {$wpdb->ratings} WHERE rating_ip='$voting_ip'", ARRAY_A);
+        return is_null($ret) ? false : $ret['rating_host'];
+    }
 
-        // if the hostname constains 'bot' or 'crawl', that's likely not a human
-        $blacklist = array(
-            'bot', 'crawl'
-        );
-        foreach ($blacklist as $bot) {
-            if (stristr($hostname, $bot) !== false) {
-                return false;
-            }
+    function insert_vote($wp_post_id, $wp_post_title, $rate, $now, $voting_ip) {
+        $hostname = $this->get_hostname_by_voting_ip($voting_ip);
+        if ( $hostname === false) {
+            $hostname = esc_attr(@gethostbyaddr($voting_ip));
         }
+
+//         // if the hostname constains 'bot' or 'crawl', that's likely not a human
+//         $blacklist = array(
+//             'bot', 'crawl'
+//         );
+//         foreach ($blacklist as $bot) {
+//             if (stristr($hostname, $bot) !== false) {
+//                 return false;
+//             }
+//         }
 
         global $wpdb;
         $rate_log = $wpdb->query(
@@ -159,68 +156,65 @@ class PP_AjaxRatings_Importer extends PP_Importer {
         return true;
     }
 
-    function pp_ajaxRatings2wp_postRatings() {
+    function pp_ajaxRating2wp_postRating($pp_post_id) {
         $pp_posts_count = $this->get_pp_post_count();
 
         $count = 0;
 
-        $pp_ratings = $this->get_pp_post_ratings();
+        $pp_rating = $this->get_pp_post_rating($pp_post_id);
         set_time_limit(0);
-        foreach($pp_ratings as $pp_rating) {
-            $now = current_time('timestamp');
 
-            if ($pp_rating['total_votes'] == 0) { // no vote, skip this entry
-                continue;
-            }
-            $wp_post_id = $this->get_pp2wp_wp_post_id($pp_rating['img_id']);
-            if ($wp_post_id === false) { // no matching wp post
-                continue;
-            }
+        $now = current_time('timestamp');
 
-            $wp_post_meta_ratings_score = get_post_meta($wp_post_id, 'ratings_score');
-            if ( ! empty($wp_post_meta_ratings_score)) { // not empty => already processed (for error recovery)
-                continue;
-            }
+        if ($pp_rating['total_votes'] == 0) { // no vote, skip this entry
+            return false;
+        }
+        $wp_post_id = $this->get_pp2wp_wp_post_id($pp_rating['img_id']);
+        if ($wp_post_id === false) { // no matching wp post
+            return false;
+        }
 
-            $wp_post_title = get_the_title($wp_post_id);
-            // readjust rates from pp scale to wp scale
-            $rate = floatval($pp_rating['total_rate']) * $this->wpmaxrating / $this->ppmaxrating;
+        $wp_post_meta_ratings_score = get_post_meta($wp_post_id, 'ratings_score');
+        if ( ! empty($wp_post_meta_ratings_score)) { // not empty => already processed (for error recovery)
+            return false;
+        }
 
-            $current_total = $rate;
-            $current_count = 1;
-            $pp_ratings = unserialize($pp_rating['used_ips']);
-            foreach($pp_ratings as $voting_ip) {
-                $nrate = intval($rate);
-                if ((floatval($current_total) / $current_count) < $rate) {
-                    ++$nrate;
-                }
-                // if the value was inserted, add it to the counts
-                if ($this->insert_vote($wp_post_id, $wp_post_title, $nrate, $now, $voting_ip)) {
-                    $current_total += $nrate;
-                    ++$current_count;
-                }
-            }
+        $wp_post_title = get_the_title($wp_post_id);
+        // readjust rates from pp scale to wp scale
+        $rate = floatval($pp_rating['total_rate']) * $this->wpmaxrating / $this->ppmaxrating;
 
-            if ( ! update_post_meta($wp_post_id, 'ratings_users', $current_count)) {
-                add_post_meta($wp_post_id, 'ratings_users', $current_count, true);
+        $current_total = $rate;
+        $current_count = 1;
+        $pp_ratings = unserialize($pp_rating['used_ips']);
+        foreach($pp_ratings as $voting_ip) {
+            $nrate = intval($rate);
+            if ((floatval($current_total) / $current_count) < $rate) {
+                ++$nrate;
             }
-            if ( ! update_post_meta($wp_post_id, 'ratings_score', $current_total)) {
-                add_post_meta($wp_post_id, 'ratings_score', $current_total, true);
+            // if the value was inserted, add it to the counts
+            if ($this->insert_vote($wp_post_id, $wp_post_title, $nrate, $now, $voting_ip)) {
+                $current_total += $nrate;
+                ++$current_count;
             }
-            if ( ! update_post_meta($wp_post_id, 'ratings_average', floatval($current_total) / $current_count)) {
-                add_post_meta($wp_post_id, 'ratings_average', floatval($current_total) / $current_count, true);
-            }
-// break;
-            // keep a trace of the last migrated pixelpost post by keeping its id
-            update_option('pp_ajaxRatings2wp_postRatings_migration_percentage', round((++$count) * 100.0 / $pp_posts_count, 2));
+        }
+
+        if ( ! update_post_meta($wp_post_id, 'ratings_users', $current_count)) {
+            add_post_meta($wp_post_id, 'ratings_users', $current_count, true);
+        }
+        if ( ! update_post_meta($wp_post_id, 'ratings_score', $current_total)) {
+            add_post_meta($wp_post_id, 'ratings_score', $current_total, true);
+        }
+        if ( ! update_post_meta($wp_post_id, 'ratings_average', floatval($current_total) / $current_count)) {
+            add_post_meta($wp_post_id, 'ratings_average', floatval($current_total) / $current_count, true);
         }
         set_time_limit(30);
         
-        return $count;
+        return true;
     }
 
     function import_ratings() {
         wp_enqueue_script( 'pixelpost-importer', plugins_url('/pixelpost-importer.js', __FILE__) );
+        wp_localize_script( 'pixelpost-importer', 'pp_post_ids', $this->get_pp_post_ids() );
         echo '<p>' . sprintf(__('Retrieved %d posts from Pixelpost, importing...'), $this->get_pp_post_count()) . '</p>';
         echo '<p id="pp_ajaxRatings2wp_postRatings_migration_log">'. __('Starting...') . '</p>';
         echo '<p>';

@@ -1,52 +1,37 @@
-var update_current_status_timeout = 0;
-var update_current_status_do = true;
-
-function update_current_status() {
-    jQuery.ajax({
-        url:      ajaxurl,
-        dataType: 'json',
-        data:     {action: 'pp_ajaxRatings2wp_postRatings_migration_status'}
-    }).done(function(percentage) {
-        if (update_current_status_do) {
-           jQuery('#pp_ajaxRatings2wp_postRatings_migration_log').html(percentage + '%  successfully imported!');
-            update_current_status_timeout = setTimeout('update_current_status()', 2000);
-        }
-    });
-}
+var migrate_stop = false;
+var current_pp_post_idx = -1;
 
 jQuery(document).on('click', '#pp_ajaxRatings2wp_postRatings_migration_stop', function(e) {
-    jQuery.ajax({
-        url:      ajaxurl,
-        dataType: 'json',
-        data:     {action: 'pp_ajaxRatings2wp_postRatings_migration_stop'}
-    }).done(function(p) {});
+    migrate_stop = true;
+
     e.preventDefault();
     return false;
 });
 
 jQuery(document).on('click', '#pp_ajaxRatings2wp_postRatings_migration_resume', function(e) {
-    jQuery.ajax({
-        url:      ajaxurl,
-        dataType: 'json',
-        data:     {action: 'pp_ajaxRatings2wp_postRatings_migration_resume'}
-    }).done(function(p) {
-        jQuery('#pp_ajaxRatings2wp_postRatings_migration_log').html('All done! Migrated ' + p + ' posts!');
-    });
-    update_current_status_do = true;
-    update_current_status_timeout = setTimeout('update_current_status()', 2000);
+    migrate_stop = false;
+    migrate();
+
     e.preventDefault();
     return false;
 });
 
+function migrate() {
+    var pp_post_id = pp_post_ids[++current_pp_post_idx];
+    if (typeof pp_post_id != 'undefined') {
+        jQuery.ajax({
+            url:      ajaxurl,
+            dataType: 'json',
+            data:     {action: 'pp_ajaxRating2wp_postRating_migrate', pp_post_id: pp_post_id}
+        }).done(function(p) {
+            jQuery('#pp_ajaxRatings2wp_postRatings_migration_log').html(Math.round((current_pp_post_idx + 1) * 10000.0 / pp_post_ids.length) / 100 + '% done!');
+            if ( ! migrate_stop) {
+                setTimeout('migrate()', 1);
+            }
+        });
+    }
+}
+
 jQuery(document).ready(function($) {
-    jQuery.ajax({
-        url:      ajaxurl,
-        dataType: 'json',
-        data:     {action: 'pp_ajaxRatings2wp_postRatings_migration_start'}
-    }).done(function(p) {
-        jQuery('#pp_ajaxRatings2wp_postRatings_migration_log').html('All done! Migrated ' + p + ' posts!');
-        update_current_status_do = false;
-        clearInterval(update_current_status_timeout);
-    });
-    update_current_status_timeout = setTimeout('update_current_status()', 2000);
+    migrate();
 });
