@@ -236,7 +236,7 @@ class PP_AjaxRatings_Importer extends PP_Importer {
     function dispatch() {
         $this->header();
 
-        $step = intval ( $_GET ['step']);
+        $step = isset( $_GET['step'] ) ? intval( $_GET['step'] ) : 0;
 
         switch ( $step ) {
             default:
